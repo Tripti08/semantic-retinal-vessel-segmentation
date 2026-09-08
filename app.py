@@ -29,7 +29,13 @@ def load_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet().to(device)
     checkpoint = torch.load(MODEL_PATH, map_location=device)
-    model.load_state_dict(checkpoint["model_state"])
+    if isinstance(checkpoint, dict) and "model_state" in checkpoint:
+        state_dict = checkpoint["model_state"]
+    elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        state_dict = checkpoint["state_dict"]
+    else:
+        state_dict = checkpoint
+    model.load_state_dict(state_dict)
     model.eval()
     return model, device
 
