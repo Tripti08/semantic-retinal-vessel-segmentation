@@ -1,0 +1,6 @@
+numpy>=1.24
+Pillow>=9.5
+tqdm>=4.65
+torch>=2.1
+streamlit>=1.32
+matplotlib>=3.7
