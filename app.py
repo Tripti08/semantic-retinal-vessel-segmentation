@@ -43,7 +43,9 @@ def load_model():
 def predict(model, device, image):
     original_size = image.size
     resized = image.convert("RGB").resize((IMAGE_SIZE, IMAGE_SIZE), Image.Resampling.BILINEAR)
-    array = np.asarray(resized, dtype=np.float32).transpose(2, 0, 1) / 255.0
+    # Match cv2.imread used by the reference training pipeline: BGR channel order.
+    array = np.asarray(resized, dtype=np.float32)[:, :, ::-1].copy()
+    array = array.transpose(2, 0, 1) / 255.0
     tensor = torch.from_numpy(array).unsqueeze(0).to(device)
     with torch.no_grad():
         prediction = torch.sigmoid(model(tensor))[0, 0].cpu().numpy()
