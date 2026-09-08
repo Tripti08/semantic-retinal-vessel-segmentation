@@ -2,70 +2,68 @@ import torch
 from torch import nn
 
 
-class DoubleConv(nn.Module):
+class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-        )
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU()
 
     def forward(self, inputs):
-        return self.block(inputs)
+        x = self.relu(self.bn1(self.conv1(inputs)))
+        return self.relu(self.bn2(self.conv2(x)))
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = ConvBlock(in_channels, out_channels)
+        self.pool = nn.MaxPool2d((2, 2))
+
+    def forward(self, inputs):
+        features = self.conv(inputs)
+        return features, self.pool(features)
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.conv = ConvBlock(out_channels + out_channels, out_channels)
+
+    def forward(self, inputs, skip):
+        x = self.up(inputs)
+        x = torch.cat([x, skip], axis=1)
+        return self.conv(x)
 
 
 class UNet(nn.Module):
-    """U-Net architecture matching the pretrained reference checkpoint."""
-
     def __init__(self):
         super().__init__()
-        features = [64, 128, 256, 512]
-        self.downs = nn.ModuleList()
-        self.ups = nn.ModuleList()
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        in_channels = 3
-        for feature in features:
-            self.downs.append(DoubleConv(in_channels, feature))
-            in_channels = feature
-
-        self.bottleneck = DoubleConv(features[-1], features[-1] * 2)
-
-        for feature in reversed(features):
-            self.ups.append(
-                nn.ConvTranspose2d(feature * 2, feature, kernel_size=2, stride=2)
-            )
-            self.ups.append(DoubleConv(feature * 2, feature))
-
-        self.output = nn.Conv2d(features[0], 1, kernel_size=1)
+        self.e1 = EncoderBlock(3, 64)
+        self.e2 = EncoderBlock(64, 128)
+        self.e3 = EncoderBlock(128, 256)
+        self.e4 = EncoderBlock(256, 512)
+        self.b = ConvBlock(512, 1024)
+        self.d1 = DecoderBlock(1024, 512)
+        self.d2 = DecoderBlock(512, 256)
+        self.d3 = DecoderBlock(256, 128)
+        self.d4 = DecoderBlock(128, 64)
+        self.outputs = nn.Conv2d(64, 1, kernel_size=1)
 
     def forward(self, inputs):
-        skip_connections = []
-        x = inputs
-
-        for down in self.downs:
-            x = down(x)
-            skip_connections.append(x)
-            x = self.pool(x)
-
-        x = self.bottleneck(x)
-        skip_connections = skip_connections[::-1]
-
-        for index in range(0, len(self.ups), 2):
-            x = self.ups[index](x)
-            skip = skip_connections[index // 2]
-            if x.shape != skip.shape:
-                x = torch.nn.functional.interpolate(
-                    x, size=skip.shape[2:], mode="bilinear", align_corners=False
-                )
-            x = torch.cat((skip, x), dim=1)
-            x = self.ups[index + 1](x)
-
-        return self.output(x)
+        s1, p1 = self.e1(inputs)
+        s2, p2 = self.e2(p1)
+        s3, p3 = self.e3(p2)
+        s4, p4 = self.e4(p3)
+        b = self.b(p4)
+        d1 = self.d1(b, s4)
+        d2 = self.d2(d1, s3)
+        d3 = self.d3(d2, s2)
+        d4 = self.d4(d3, s1)
+        return self.outputs(d4)
 
 
 build_unet = UNet
