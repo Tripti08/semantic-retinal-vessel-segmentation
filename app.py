@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import gdown
 import numpy as np
 import streamlit as st
 import torch
@@ -10,12 +11,20 @@ from UNET.model import UNet
 
 
 MODEL_PATH = Path(os.getenv("MODEL_PATH", "checkpoints/best_model.pth"))
+CHECKPOINT_ID = "1Wl7-E6Tk3YpeJ7GIYScGvUeW9ou474yy"
 IMAGE_SIZE = 512
 
 
 @st.cache_resource
 def load_model():
     if not MODEL_PATH.exists():
+        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            gdown.download(id=CHECKPOINT_ID, output=str(MODEL_PATH), quiet=False)
+        except Exception as error:
+            st.error(f"Could not download the model checkpoint: {error}")
+            return None
+    if not MODEL_PATH.exists() or MODEL_PATH.stat().st_size < 1_000_000:
         return None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet().to(device)
@@ -33,8 +42,7 @@ def predict(model, device, image):
     with torch.no_grad():
         prediction = torch.sigmoid(model(tensor))[0, 0].cpu().numpy()
     mask = (prediction > 0.5).astype(np.uint8) * 255
-    mask_image = Image.fromarray(mask).resize(original_size, Image.Resampling.NEAREST)
-    return mask_image
+    return Image.fromarray(mask).resize(original_size, Image.Resampling.NEAREST)
 
 
 st.set_page_config(page_title="Retinal Vessel Segmentation", page_icon="🩺", layout="wide")
@@ -43,8 +51,8 @@ st.write("Upload a retinal fundus image to generate a vessel segmentation mask."
 
 loaded = load_model()
 if loaded is None:
-    st.error(f"Model checkpoint not found: {MODEL_PATH}")
-    st.info("Train the model first, then place best_model.pth in the checkpoints/ folder.")
+    st.error("The model checkpoint is unavailable.")
+    st.info("The app downloads the pretrained U-Net checkpoint automatically. Check the deployment logs if the download failed.")
     st.stop()
 
 model, device = loaded
@@ -56,11 +64,9 @@ if uploaded is not None:
     image_array = np.asarray(image, dtype=np.uint8)
     mask_array = np.asarray(mask, dtype=np.uint8)
     overlay = image_array.copy()
-    vessel_pixels = mask_array > 0
-    overlay[vessel_pixels] = [255, 0, 0]
+    overlay[mask_array > 0] = [255, 0, 0]
 
     left, middle, right = st.columns(3)
     left.image(image, caption="Input image", use_container_width=True)
     middle.image(mask, caption="Predicted vessels", use_container_width=True)
     right.image(overlay, caption="Overlay", use_container_width=True)
-
